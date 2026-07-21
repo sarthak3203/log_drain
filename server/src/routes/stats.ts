@@ -4,9 +4,10 @@ import { query } from "../db";
 const router = Router();
 // GET /api/v1/stats — log volume over time, for dashboard charts
 router.get("/stats", apiKeyAuth, async (req, res) => {
-  const project_id = (req as any).project_id;
+  const project_id = req.project_id;
   const { hours = "24" } = req.query as Record<string, string>;
-  const hoursNum = Math.min(parseInt(hours), 168); // max 7 days
+  const parsed = Number.parseInt(hours, 10);
+  const hoursNum = Number.isFinite(parsed) ? Math.min(parsed, 168) : 24;
   // date_trunc groups timestamps by hour
   const volumeStats = await query(
     `SELECT
@@ -16,10 +17,10 @@ router.get("/stats", apiKeyAuth, async (req, res) => {
  COUNT(*) as count
  FROM logs
  WHERE project_id = $1
- AND timestamp > NOW() - INTERVAL '${hoursNum} hours'
+ AND timestamp > NOW() - ($2::int * INTERVAL '1 hour')
  GROUP BY hour, service, level
  ORDER BY hour ASC`,
-    [project_id],
+    [project_id, hoursNum],
   );
   // Error rate per service
   const errorRates = await query(

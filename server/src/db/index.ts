@@ -1,4 +1,8 @@
+import 'dotenv/config';
 import { Pool } from "pg";
+if (!process.env.DATABASE_URL) {
+  throw new Error('DATABASE_URL environment variable is required');
+}
 // Connection pool: reuses connections instead of creating a new one per query
 // Max 20 connections is a safe default; tune based on your Postgres max_connections
 const pool = new Pool({
@@ -13,7 +17,7 @@ pool.on("connect", () => {
 });
 pool.on("error", (err) => {
   console.error("Unexpected Postgres error:", err);
-  process.exit(-1);
+  process.exit(1);
 });
 export const db = pool;
 // Helper: run a query with automatic error logging

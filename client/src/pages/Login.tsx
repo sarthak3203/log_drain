@@ -13,6 +13,10 @@ export default function Login({ onLogin }: LoginProps) {
     e.preventDefault();
     if (!apiKey.trim()) return;
     localStorage.setItem("api_key", apiKey.trim());
+    if (!apiKey.startsWith("log_")) {
+      setError("Invalid API key format. Keys start with log_");
+      return;
+    }
     onLogin();
   }
   async function handleCreate(e: React.FormEvent) {
@@ -27,7 +31,7 @@ export default function Login({ onLogin }: LoginProps) {
   if (newKey) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
-        <div className="max-w-md w-full bg-white rounded-xl border border-gray-200 p8">
+        <div className="max-w-md w-full bg-white rounded-xl border border-gray-200 p-8">
           <h2 className="text-lg font-semibold text-gray-900 mb-2">
             Project created!
           </h2>
@@ -45,7 +49,7 @@ break-all mb-4"
               localStorage.setItem("api_key", newKey);
               onLogin();
             }}
-            className="w-full py-2 bg-blue-600 text-white rounded-lg text-sm fontmedium hover:bg-blue-700"
+            className="w-full py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700"
           >
             Continue to dashboard
           </button>
@@ -93,11 +97,12 @@ break-all mb-4"
                 onChange={(e) => setApiKey(e.target.value)}
                 placeholder="log_abc123..."
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm
-font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+  font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
+              {error && <p className="text-red-500 text-sm">{error}</p>}
               <button
                 type="submit"
-                className="w-full py-2 bg-blue-600 text-white rounded-lg text-sm fontmedium hover:bg-blue-700"
+                className="w-full py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700"
               >
                 Open dashboard
               </button>
@@ -115,7 +120,7 @@ focus:outline-none focus:ring-2 focus:ring-blue-500"
               {error && <p className="text-red-500 text-sm">{error}</p>}
               <button
                 type="submit"
-                className="w-full py-2 bg-blue-600 text-white rounded-lg text-sm fontmedium hover:bg-blue-700"
+                className="w-full py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700"
               >
                 Create project & get API key
               </button>
@@ -123,7 +128,7 @@ focus:outline-none focus:ring-2 focus:ring-blue-500"
           )}
         </div>
         <div className="mt-6 bg-gray-900 rounded-xl p-5 text-sm">
-          <p className="text-gray-400 mb-3 text-xs font-medium uppercase trackingwider">
+          <p className="text-gray-400 mb-3 text-xs font-medium uppercase tracking-wider">
             Quick start
           </p>
           <p className="text-green-400 font-mono text-xs">

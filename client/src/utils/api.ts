@@ -38,6 +38,23 @@ export const api = {
     });
     return data;
   },
+  async getAlertRules() {
+    const { data } = await axios.get(`${BASE_URL}/alert-rules`, {
+      headers: getAuthHeader(),
+    });
+    return data;
+  },
+  async createAlertRule(rule: {
+    name: string;
+    condition: object;
+    service: string;
+    notify_url: string;
+  }) {
+    const { data } = await axios.post(`${BASE_URL}/alert-rules`, rule, {
+      headers: getAuthHeader(),
+    });
+    return data;
+  },
   async createProject(name: string) {
     const { data } = await axios.post(`${BASE_URL}/projects`, { name });
     return data;

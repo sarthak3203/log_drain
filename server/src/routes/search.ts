@@ -6,7 +6,7 @@ import { generateSearchAnswer } from "../services/llm";
 const router = Router();
 // GET /api/v1/search?q=database+connection+failures&from=...&to=...&limit=10
 router.get("/search", apiKeyAuth, async (req, res) => {
-  const project_id = (req as any).project_id;
+  const project_id = req.project_id;
   const {
     q: userQuery,
     from,
@@ -17,7 +17,16 @@ router.get("/search", apiKeyAuth, async (req, res) => {
   if (!userQuery) {
     return res.status(400).json({ error: "Query parameter q is required" });
   }
-  const limitNum = Math.min(parseInt(limit), 50);
+  if (from && isNaN(new Date(from).getTime())) {
+    res.status(400).json({ error: "Invalid from date" });
+    return;
+  }
+  if (to && isNaN(new Date(to).getTime())) {
+    res.status(400).json({ error: "Invalid to date" });
+    return;
+  }
+  const parsed = Number.parseInt(limit, 10);
+  const limitNum = Number.isFinite(parsed) ? Math.min(parsed, 50) : 10;
   try {
     // Step 1: Convert the user's question to a vector
     const queryEmbedding = await getEmbedding(userQuery);
@@ -48,10 +57,10 @@ router.get("/search", apiKeyAuth, async (req, res) => {
     const similarLogs = await query(
       `SELECT
  id, level, message, service, timestamp, metadata,
- 1 - (embedding <-> $1) as similarity_score
+ 1 - (embedding <=> $1::vector) as similarity_score
  FROM logs
  WHERE ${whereClause}
- ORDER BY embedding <-> $1
+ ORDER BY embedding <=> $1::vector
  LIMIT $${paramIndex}`,
       [...params, limitNum],
     );

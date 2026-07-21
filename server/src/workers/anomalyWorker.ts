@@ -1,4 +1,5 @@
 import { query } from "../db";
+import { fireAlert } from '../routes/alerts';
 const WORKER_INTERVAL = 5 * 60 * 1000; // run every 5 minutes
 const SAMPLE_SIZE = 200; // use last 200 logs to compute centroid
 const ANOMALY_THRESHOLD_STD = 2; // flag if > 2 standard deviations from mean distance;
@@ -37,13 +38,23 @@ async function detectAnomaliesForService(
   if (recentLogs.length < 10) return; // need enough data for meaningful stats
   // Postgres returns vectors as a string like "[0.1,0.2,...]"
   // Parse them back to number arrays
-  const embeddings = recentLogs.map((log) => {
-    const raw = log.embedding as any;
-    if (typeof raw === "string") {
-      return JSON.parse(raw) as number[];
+  const validPairs: Array<{ id: number; embedding: number[] }> = [];
+  for (const log of recentLogs) {
+    try {
+      const raw = log.embedding as any;
+      const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      if (!Array.isArray(parsed) || parsed.length !== 768) {
+        console.error(`Invalid embedding dimensions for log ${log.id}`);
+        continue;
+      }
+      validPairs.push({ id: log.id, embedding: parsed as number[] });
+    } catch (e) {
+      console.error(`Skipping malformed embedding for log ${log.id}`);
     }
-    return raw as number[];
-  });
+  }
+  if (validPairs.length < 10) return;
+
+  const embeddings = validPairs.map(p => p.embedding);
   const dims = embeddings[0].length; // 384
   // Step 2: Compute the centroid
   // The centroid is just the element-wise average of all vectors
@@ -73,9 +84,9 @@ async function detectAnomaliesForService(
   const anomalyThreshold = meanDist + ANOMALY_THRESHOLD_STD * stdDist;
   const updates: Array<{ id: number; distance: number; isAnomaly: boolean }> =
     [];
-  for (let i = 0; i < recentLogs.length; i++) {
+  for (let i = 0; i < validPairs.length; i++) {
     updates.push({
-      id: recentLogs[i].id,
+      id: validPairs[i].id,
       distance: distances[i],
       isAnomaly: distances[i] > anomalyThreshold,
     });
@@ -95,7 +106,34 @@ async function detectAnomaliesForService(
   if (anomalyCount > 0) {
     console.log(`Anomaly detection: ${service} — ${anomalyCount} anomalies found
 (threshold: ${anomalyThreshold.toFixed(4)})`);
-    // TODO: trigger alert rules here
+    if (anomalyCount > 0) {
+      try {
+        const activeRules = await query<{
+          id: string;
+          project_id: string;
+          notify_url: string;
+          notify_email: string;
+        }>(
+          `SELECT id, project_id, notify_url, notify_email
+       FROM alert_rules
+       WHERE project_id = $1
+         AND active = TRUE
+         AND (condition->>'type' = 'anomaly')`,
+          [project_id]
+        );
+
+        for (const rule of activeRules) {
+          await fireAlert(rule.id, project_id, {
+            service,
+            anomaly_count: anomalyCount,
+            threshold: anomalyThreshold,
+            detected_at: new Date().toISOString(),
+          });
+        }
+      } catch (alertErr) {
+        console.error('Failed to fire anomaly alerts:', alertErr);
+      }
+    }
   }
 }
 // Cosine distance between two vectors
@@ -114,5 +152,7 @@ function cosineDist(a: number[], b: number[]): number {
 }
 export function startAnomalyWorker(): void {
   console.log("Anomaly detection worker started");
+  // Run immediately on startup, then every WORKER_INTERVAL
+  detectAnomalies();
   setInterval(detectAnomalies, WORKER_INTERVAL);
 }

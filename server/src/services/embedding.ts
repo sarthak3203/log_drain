@@ -1,39 +1,44 @@
-import OpenAI from "openai";
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-// Convert text to a 384-dimensional vector
-// Returns an array of 384 floats
+import 'dotenv/config';
+const { GoogleGenAI } = require("@google/genai");
+
+if (!process.env.GEMINI_API_KEY) {
+  throw new Error('GEMINI_API_KEY environment variable is required');
+}
+
+const ai = new GoogleGenAI({
+  apiKey: process.env.GEMINI_API_KEY,
+});
+
 export async function getEmbedding(text: string): Promise<number[]> {
-  if (process.env.EMBEDDING_MODEL === "openai") {
-    return getOpenAIEmbedding(text);
+  let lastError: any;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const result = await ai.models.embedContent({
+        model: 'gemini-embedding-2',
+        contents: text.substring(0, 8000),
+        config: { outputDimensionality: 768 },
+      });
+      return result.embeddings[0].values;
+    } catch (err: any) {
+      lastError = err;
+      if (err?.status === 503 || err?.status === 429) {
+        const waitMs = attempt * 2000;
+        console.log(`Gemini unavailable, retrying in ${waitMs}ms (attempt ${attempt}/3)`);
+        await new Promise(resolve => setTimeout(resolve, waitMs));
+      } else {
+        throw err;
+      }
+    }
   }
-  // For local model, you'd call a local FastAPI server running all-MiniLM-L6-v2
-  // That's an optional extension covered in the deployment section
-  return getOpenAIEmbedding(text);
+  throw lastError;
 }
-async function getOpenAIEmbedding(text: string): Promise<number[]> {
-  // Truncate long texts — embedding models have token limits
-  // 8000 chars is safely under the limit for most models
-  const truncated = text.substring(0, 8000);
 
-  const response = await openai.embeddings.create({
-    model: "text-embedding-3-small",
-    input: truncated,
-    dimensions: 384, // request 384 dims for compatibility with pgvector setup
-  });
-  return response.data[0].embedding;
-}
-// Batch embedding: more efficient than one-at-a-time
-// OpenAI's API accepts up to 2048 inputs per request
 export async function getBatchEmbeddings(texts: string[]): Promise<number[][]> {
-  const truncated = texts.map((t) => t.substring(0, 8000));
-
-  const response = await openai.embeddings.create({
-    model: "text-embedding-3-small",
-    input: truncated,
-    dimensions: 384,
-  });
-  // Sort by index to ensure order matches input
-  return response.data
-    .sort((a, b) => a.index - b.index)
-    .map((item) => item.embedding);
+  const embeddings: number[][] = [];
+  for (const text of texts) {
+    const embedding = await getEmbedding(text);
+    embeddings.push(embedding);
+    await new Promise(resolve => setTimeout(resolve, 150));
+  }
+  return embeddings;
 }

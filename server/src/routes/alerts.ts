@@ -5,7 +5,7 @@ import { query } from '../db';
 const router = Router();
 // Create an alert rule
 router.post('/alert-rules', apiKeyAuth, async (req, res) => {
- const project_id = (req as any).project_id;
+ const project_id = req.project_id;
  const { name, condition, service, notify_url, notify_email } = req.body;
  if (!condition) {
  return res.status(400).json({ error: 'Condition is required' });
@@ -21,7 +21,7 @@ notify_email)
 });
 // List alert rules
 router.get('/alert-rules', apiKeyAuth, async (req, res) => {
- const project_id = (req as any).project_id;
+ const project_id = req.project_id;
  const rules = await query(
  `SELECT * FROM alert_rules WHERE project_id = $1 ORDER BY created_at DESC`,
  [project_id]
@@ -30,7 +30,7 @@ router.get('/alert-rules', apiKeyAuth, async (req, res) => {
 });
 // List recent alert events
 router.get('/alerts', apiKeyAuth, async (req, res) => {
- const project_id = (req as any).project_id;
+ const project_id = req.project_id;
  const events = await query(
  `SELECT ae.*, ar.name as rule_name
  FROM alert_events ae
@@ -66,7 +66,7 @@ export async function fireAlert(
  project_id: projectId,
  fired_at: new Date().toISOString(),
  details,
- });
+ }, { timeout: 5000 });
  } catch (err) {
  console.error('Webhook delivery failed:', err);
  }

@@ -1,3 +1,12 @@
+declare global {
+  namespace Express {
+    interface Request {
+      project_id?: string;
+      api_key_id?: string;
+    }
+  }
+}
+
 export interface Log {
   id: number;
   project_id: string;

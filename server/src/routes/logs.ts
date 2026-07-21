@@ -9,7 +9,7 @@ const redis = new Redis(process.env.REDIS_URL!);
 // Accepts single log or array of logs
 // Returns 202 Accepted immediately — does NOT wait for DB write
 router.post("/logs", apiKeyAuth, async (req, res) => {
-  const project_id = (req as any).project_id;
+  const project_id = req.project_id;
   const body = req.body;
   // Normalize: accept both single log and array
   const logs: LogInput[] = Array.isArray(body) ? body : [body];
@@ -56,64 +56,78 @@ router.post("/logs", apiKeyAuth, async (req, res) => {
 });
 // GET /api/v1/logs — filtered log retrieval with cursor pagination
 router.get("/logs", apiKeyAuth, async (req, res) => {
-  const project_id = (req as any).project_id;
-  const {
-    level,
-    service,
-    from,
-    to,
-    cursor,
-    limit = "50",
-  } = req.query as Record<string, string>;
-  const limitNum = Math.min(parseInt(limit), 200); // cap at 200
-  // Build query dynamically
-  const conditions: string[] = ["project_id = $1"];
-  const params: any[] = [project_id];
-  let paramIndex = 2;
-  if (level) {
-    conditions.push(`level = $${paramIndex++}`);
-    params.push(level.toUpperCase());
-  }
-  if (service) {
-    conditions.push(`service = $${paramIndex++}`);
-    params.push(service);
-  }
-  if (from) {
-    conditions.push(`timestamp >= $${paramIndex++}`);
-    params.push(new Date(from));
-  }
-  if (to) {
-    conditions.push(`timestamp <= $${paramIndex++}`);
-    params.push(new Date(to));
-  }
-  // Cursor-based pagination: cursor is the last seen log ID
-  // More efficient than OFFSET because OFFSET scans and discards rows
-  if (cursor) {
-    conditions.push(`id < $${paramIndex++}`);
-    params.push(parseInt(cursor));
-  }
-  const whereClause = conditions.join(" AND ");
-  const logs = await query(
-    `SELECT id, level, message, service, timestamp, metadata, is_anomaly, anomaly_score
+  try {
+    const project_id = req.project_id;
+    const {
+      level,
+      service,
+      from,
+      to,
+      cursor,
+      limit = "50",
+    } = req.query as Record<string, string>;
+    if (from && isNaN(new Date(from).getTime())) {
+      res.status(400).json({ error: "Invalid from date" });
+      return;
+    }
+    if (to && isNaN(new Date(to).getTime())) {
+      res.status(400).json({ error: "Invalid to date" });
+      return;
+    }
+    const parsed = Number.parseInt(limit, 10);
+    const limitNum = Number.isFinite(parsed) ? Math.min(parsed, 200) : 50;
+    // Build query dynamically
+    const conditions: string[] = ["project_id = $1"];
+    const params: any[] = [project_id];
+    let paramIndex = 2;
+    if (level) {
+      conditions.push(`level = $${paramIndex++}`);
+      params.push(level.toUpperCase());
+    }
+    if (service) {
+      conditions.push(`service = $${paramIndex++}`);
+      params.push(service);
+    }
+    if (from) {
+      conditions.push(`timestamp >= $${paramIndex++}`);
+      params.push(new Date(from));
+    }
+    if (to) {
+      conditions.push(`timestamp <= $${paramIndex++}`);
+      params.push(new Date(to));
+    }
+    // Cursor-based pagination: cursor is the last seen log ID
+    // More efficient than OFFSET because OFFSET scans and discards rows
+    if (cursor) {
+      conditions.push(`id < $${paramIndex++}`);
+      params.push(parseInt(cursor));
+    }
+    const whereClause = conditions.join(" AND ");
+    const logs = await query(
+      `SELECT id, level, message, service, timestamp, metadata, is_anomaly, anomaly_score
  FROM logs
  WHERE ${whereClause}
  ORDER BY id DESC
  LIMIT $${paramIndex}`,
-    [...params, limitNum + 1], // fetch one extra to know if there's a next page
-  );
-  // If we got limitNum+1 results, there are more
-  const hasMore = logs.length > limitNum;
-  const results = hasMore ? logs.slice(0, limitNum) : logs;
-  const nextCursor = hasMore ? results[results.length - 1].id : null;
-  res.json({
-    logs: results,
-    next_cursor: nextCursor,
-    has_more: hasMore,
-  });
+      [...params, limitNum + 1], // fetch one extra to know if there's a next page
+    );
+    // If we got limitNum+1 results, there are more
+    const hasMore = logs.length > limitNum;
+    const results = hasMore ? logs.slice(0, limitNum) : logs;
+    const nextCursor = hasMore ? results[results.length - 1].id : null;
+    res.json({
+      logs: results,
+      next_cursor: nextCursor,
+      has_more: hasMore,
+    });
+  } catch (err) {
+    console.error("Get logs error:", err);
+    res.status(500).json({ error: "Failed to fetch logs" });
+  }
 });
 // GET /api/v1/services — list services sending logs
 router.get("/services", apiKeyAuth, async (req, res) => {
-  const project_id = (req as any).project_id;
+  const project_id = req.project_id;
   const services = await query(
     `SELECT service, COUNT(*) as log_count, MAX(timestamp) as last_seen
  FROM logs

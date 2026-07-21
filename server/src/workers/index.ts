@@ -10,12 +10,13 @@ startAnomalyWorker();
 import cron from "node-cron";
 import { query } from "../db";
 cron.schedule("0 2 * * *", async () => {
-  // Runs at 2am every day
-  console.log("Running retention cleanup...");
-  const result = await query(
-    `DELETE FROM logs WHERE timestamp < NOW() - INTERVAL '30 days'`,
-  );
-  console.log(`Retention: cleaned up old logs`);
+  try {
+    console.log("Running retention cleanup...");
+    await query(`DELETE FROM logs WHERE timestamp < NOW() - INTERVAL '30 days'`);
+    console.log("Retention cleanup completed");
+  } catch (err) {
+    console.error("Retention cleanup failed:", err);
+  }
 });
 // Keep process alive
 process.on("SIGTERM", () => {
