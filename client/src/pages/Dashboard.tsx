@@ -24,6 +24,7 @@ export default function Dashboard() {
   const anomaliesRef = useRef<HTMLDivElement>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResult, setSearchResult] = useState<any>(null);
+  const [structuredResult, setStructuredResult] = useState<any>(null);
   const [searchMode, setSearchMode] = useState<'hybrid' | 'semantic' | 'keyword'>('hybrid');
   const [searching, setSearching] = useState(false);
   const [streamingAnswer, setStreamingAnswer] = useState('');
@@ -70,6 +71,12 @@ export default function Dashboard() {
     setSearchResult(null);
     setStreamingAnswer('');
     setIsStreaming(true);
+    setStructuredResult(null);
+
+    // Run structured search in background to get severity metadata
+    api.structuredSearch(searchQuery, { mode: searchMode })
+      .then(result => setStructuredResult(result))
+      .catch(err => console.error('Background structured search error:', err));
 
     const apiKey = localStorage.getItem('api_key');
     const params = new URLSearchParams({
@@ -393,6 +400,25 @@ focus:outline-none focus:ring-2 focus:ring-blue-500"
                     </ReactMarkdown>
                   )}
                 </div>
+                {structuredResult && (
+                  <div className="mt-3 flex items-center gap-2">
+                    <span className="text-xs text-gray-500">Severity:</span>
+                    <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold capitalize ${
+                      structuredResult.structured.severity === 'critical' 
+                        ? 'bg-red-100 text-red-700 border border-red-200' 
+                        : structuredResult.structured.severity === 'high' 
+                        ? 'bg-orange-100 text-orange-700 border border-orange-200'
+                        : structuredResult.structured.severity === 'medium'
+                        ? 'bg-yellow-100 text-yellow-700 border border-yellow-200'
+                        : 'bg-green-100 text-green-700 border border-green-200'
+                    }`}>
+                      {structuredResult.structured.severity}
+                    </span>
+                    <span className="text-xs text-gray-400">
+                      {structuredResult.structured.error_count} errors · {structuredResult.structured.affected_services.join(', ')}
+                    </span>
+                  </div>
+                )}
               </div>
               <div className="space-y-2">
                 <p className="text-xs text-gray-500 font-medium flex items-center gap-2">
