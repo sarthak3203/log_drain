@@ -11,9 +11,9 @@ const pool = new Pool({
   idleTimeoutMillis: 30000, // close idle connections after 30s
   connectionTimeoutMillis: 2000, // fail fast if we can't get a connection
 });
-// Test the connection on startup
+// The pool creates clients lazily; this fires each time a new pooled client is opened.
 pool.on("connect", () => {
-  console.log("Connected to Postgres");
+  console.log("Postgres pool opened a new client connection");
 });
 pool.on("error", (err) => {
   console.error("Unexpected Postgres error:", err);

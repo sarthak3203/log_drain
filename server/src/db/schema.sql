@@ -27,17 +27,26 @@ CREATE TABLE IF NOT EXISTS logs (
   metadata      JSONB,
   embedding     vector(768),
   anomaly_score FLOAT,
-  is_anomaly    BOOLEAN DEFAULT FALSE
+  is_anomaly    BOOLEAN DEFAULT FALSE,
+  fts_vector    tsvector GENERATED ALWAYS AS (
+    to_tsvector('english', 
+      coalesce(message, '') || ' ' || 
+      coalesce(service, '') || ' ' || 
+      coalesce(level, '')
+    )
+  ) STORED
 );
 
 CREATE INDEX IF NOT EXISTS logs_embedding_idx
-  ON logs USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
+  ON logs USING hnsw (embedding vector_cosine_ops);
 
 CREATE INDEX IF NOT EXISTS logs_service_time_idx
   ON logs (project_id, service, timestamp DESC);
 
 CREATE INDEX IF NOT EXISTS logs_level_idx
   ON logs (project_id, level, timestamp DESC);
+
+CREATE INDEX IF NOT EXISTS logs_fts_idx ON logs USING GIN (fts_vector);
 
 CREATE TABLE IF NOT EXISTS alert_rules (
   id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),

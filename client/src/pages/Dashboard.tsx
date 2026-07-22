@@ -24,6 +24,7 @@ export default function Dashboard() {
   const anomaliesRef = useRef<HTMLDivElement>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResult, setSearchResult] = useState<any>(null);
+  const [searchMode, setSearchMode] = useState<'hybrid' | 'semantic' | 'keyword'>('hybrid');
   const [searching, setSearching] = useState(false);
   const [loading, setLoading] = useState(true);
   const [levelFilter, setLevelFilter] = useState("");
@@ -64,7 +65,7 @@ export default function Dashboard() {
     if (!searchQuery.trim()) return;
     setSearching(true);
     try {
-      const result = await api.search(searchQuery);
+      const result = await api.search(searchQuery, { mode: searchMode });
       setSearchResult(result);
     } catch (err) {
       console.error("Search failed:", err);
@@ -225,6 +226,22 @@ export default function Dashboard() {
               className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-sm
 focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
+            <div className="flex gap-1 mt-2">
+              {(['hybrid', 'semantic', 'keyword'] as const).map(m => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => setSearchMode(m)}
+                  className={`px-3 py-1 text-xs rounded-full capitalize transition-colors ${
+                    searchMode === m
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                  }`}
+                >
+                  {m === 'hybrid' ? '⚡ Hybrid' : m === 'semantic' ? '🧠 Semantic' : '🔤 Keyword'}
+                </button>
+              ))}
+            </div>
             <div className="flex flex-col items-end gap-1">
               <button
                 type="submit"
@@ -251,11 +268,21 @@ focus:outline-none focus:ring-2 focus:ring-blue-500"
                 </div>
               </div>
               <div className="space-y-2">
-                <p className="text-xs text-gray-500 font-medium">
+                <p className="text-xs text-gray-500 font-medium flex items-center gap-2">
                   Relevant log entries ({searchResult.logs?.length})
+                  <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full text-xs capitalize">
+                    {searchResult.mode} search
+                  </span>
                 </p>
                 {searchResult.logs?.map((log: any) => (
-                  <LogRow key={log.id} log={log} levelColors={levelColors} scrollToAnomalies={scrollToAnomalies} />
+                  <div key={log.id}>
+                    <LogRow log={log} levelColors={levelColors} />
+                    {log.rrf_score && (
+                      <div className="text-xs text-gray-400 pl-2 pb-1">
+                        relevance score: {(log.rrf_score * 100).toFixed(2)}%
+                      </div>
+                    )}
+                  </div>
                 ))}
               </div>
             </div>
@@ -430,7 +457,7 @@ function LogRow({
 }: {
   log: any;
   levelColors: Record<string, string>;
-  scrollToAnomalies: () => void;
+  scrollToAnomalies?: () => void;
 }) {
   return (
     <div

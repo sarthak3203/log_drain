@@ -1,87 +1,98 @@
-import { Router } from "express";
-import { apiKeyAuth } from "../middleware/apiKey";
-import { query } from "../db";
-import { getEmbedding } from "../services/embedding";
-import { generateSearchAnswer } from "../services/llm";
+import { Router } from 'express';
+import { apiKeyAuth } from '../middleware/apiKey';
+import { generateSearchAnswer } from '../services/llm';
+import { LogHybridRetriever } from '../services/hybridRetriever';
+
 const router = Router();
-// GET /api/v1/search?q=database+connection+failures&from=...&to=...&limit=10
-router.get("/search", apiKeyAuth, async (req, res) => {
-  const project_id = req.project_id;
+
+// GET /api/v1/search
+// mode: 'hybrid' (default) | 'semantic' | 'keyword'
+router.get('/search', apiKeyAuth, async (req, res) => {
+  const project_id = (req as any).project_id;
   const {
     q: userQuery,
     from,
     to,
     service,
-    limit = "10",
+    limit = '10',
+    mode = 'hybrid',
   } = req.query as Record<string, string>;
+
   if (!userQuery) {
-    return res.status(400).json({ error: "Query parameter q is required" });
+    return res.status(400).json({ error: 'Query parameter q is required' });
   }
-  if (from && isNaN(new Date(from).getTime())) {
-    res.status(400).json({ error: "Invalid from date" });
-    return;
-  }
-  if (to && isNaN(new Date(to).getTime())) {
-    res.status(400).json({ error: "Invalid to date" });
-    return;
-  }
+
   const parsed = Number.parseInt(limit, 10);
   const limitNum = Number.isFinite(parsed) ? Math.min(parsed, 50) : 10;
+
+  // Date validation
+  if (from && isNaN(new Date(from).getTime())) {
+    return res.status(400).json({ error: 'Invalid from date' });
+  }
+  if (to && isNaN(new Date(to).getTime())) {
+    return res.status(400).json({ error: 'Invalid to date' });
+  }
+
   try {
-    // Step 1: Convert the user's question to a vector
-    const queryEmbedding = await getEmbedding(userQuery);
-    const queryVector = `[${queryEmbedding.join(",")}]`;
-    // Step 2: Build time/service filters
-    const conditions: string[] = [
-      "project_id = $2",
-      "embedding IS NOT NULL", // only logs that have been embedded
-    ];
-    const params: any[] = [queryVector, project_id];
-    let paramIndex = 3;
-    if (from) {
-      conditions.push(`timestamp >= $${paramIndex++}`);
-      params.push(new Date(from));
+    // Configure weights based on mode
+    let semanticWeight = 0.6;
+    let keywordWeight = 0.4;
+
+    if (mode === 'semantic') {
+      semanticWeight = 1.0;
+      keywordWeight = 0.0;
+    } else if (mode === 'keyword') {
+      semanticWeight = 0.0;
+      keywordWeight = 1.0;
     }
-    if (to) {
-      conditions.push(`timestamp <= $${paramIndex++}`);
-      params.push(new Date(to));
-    }
-    if (service) {
-      conditions.push(`service = $${paramIndex++}`);
-      params.push(service);
-    }
-    const whereClause = conditions.join(" AND ");
-    // Step 3: Vector similarity search
-    // The <-> operator is cosine distance in pgvector
-    // ORDER BY this = most similar logs first
-    const similarLogs = await query(
-      `SELECT
- id, level, message, service, timestamp, metadata,
- 1 - (embedding <=> $1::vector) as similarity_score
- FROM logs
- WHERE ${whereClause}
- ORDER BY embedding <=> $1::vector
- LIMIT $${paramIndex}`,
-      [...params, limitNum],
-    );
-    if (similarLogs.length === 0) {
+
+    // Use LangChain custom retriever
+    const retriever = new LogHybridRetriever({
+      projectId: project_id,
+      topK: limitNum,
+      semanticWeight,
+      keywordWeight,
+      fromDate: from ? new Date(from) : undefined,
+      toDate: to ? new Date(to) : undefined,
+      service: service || undefined,
+    });
+
+    const documents = await retriever.invoke(userQuery);
+
+    if (documents.length === 0) {
       return res.json({
-        answer: "No relevant logs found for your query.",
+        answer: 'No relevant logs found for your query.',
         logs: [],
         query: userQuery,
+        mode,
       });
     }
-    // Step 4: Generate plain-English answer using the retrieved logs
-    const answer = await generateSearchAnswer(userQuery, similarLogs as any);
+
+    // Convert Documents back to log format for the LLM and response
+    const logs = documents.map(doc => ({
+      id: doc.metadata.id,
+      level: doc.metadata.level,
+      message: doc.pageContent,
+      service: doc.metadata.service,
+      timestamp: doc.metadata.timestamp,
+      metadata: doc.metadata.metadata,
+      rrf_score: doc.metadata.rrf_score,
+    }));
+
+    // Generate AI answer using retrieved logs
+    const answer = await generateSearchAnswer(userQuery, logs as any);
+
     res.json({
       answer,
-      logs: similarLogs,
+      logs,
       query: userQuery,
-      logs_searched: similarLogs.length,
+      mode,
+      logs_searched: logs.length,
     });
   } catch (err) {
-    console.error("Search error:", err);
-    res.status(500).json({ error: "Search failed" });
+    console.error('Search error:', err);
+    res.status(500).json({ error: 'Search failed' });
   }
 });
+
 export default router;
