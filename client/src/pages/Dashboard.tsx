@@ -26,6 +26,8 @@ export default function Dashboard() {
   const [searchResult, setSearchResult] = useState<any>(null);
   const [searchMode, setSearchMode] = useState<'hybrid' | 'semantic' | 'keyword'>('hybrid');
   const [searching, setSearching] = useState(false);
+  const [streamingAnswer, setStreamingAnswer] = useState('');
+  const [isStreaming, setIsStreaming] = useState(false);
   const [loading, setLoading] = useState(true);
   const [levelFilter, setLevelFilter] = useState("");
   const [serviceFilter, setServiceFilter] = useState("");
@@ -63,14 +65,117 @@ export default function Dashboard() {
   async function handleSearch(e: FormEvent) {
     e.preventDefault();
     if (!searchQuery.trim()) return;
+
     setSearching(true);
+    setSearchResult(null);
+    setStreamingAnswer('');
+    setIsStreaming(true);
+
+    const apiKey = localStorage.getItem('api_key');
+    const params = new URLSearchParams({
+      q: searchQuery,
+      mode: searchMode,
+    });
+
     try {
-      const result = await api.search(searchQuery, { mode: searchMode });
-      setSearchResult(result);
+      const response = await fetch(
+        `http://localhost:3000/api/v1/search/stream?${params.toString()}`,
+        {
+          headers: {
+            'Authorization': `Bearer ${apiKey}`,
+            'Accept': 'text/event-stream',
+          },
+        }
+      );
+
+      if (!response.ok) throw new Error('Search failed');
+
+      const reader = response.body!.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let receivedLogs: any[] = [];
+      let receivedMode = searchMode;
+      
+      // Word queue for smooth animation
+      const wordQueue: string[] = [];
+      let displayedText = '';
+      let animating = false;
+
+      // Animator runs independently of the stream reader
+      const animateNextWord = () => {
+        if (wordQueue.length === 0) {
+          animating = false;
+          return;
+        }
+        const word = wordQueue.shift()!;
+        displayedText += word;
+        setStreamingAnswer(displayedText);
+        setTimeout(animateNextWord, 80);
+      };
+
+      const addToQueue = (text: string) => {
+        const words = text.split(/(\s+)/); // split but keep spaces
+        wordQueue.push(...words);
+        if (!animating) {
+          animating = true;
+          animateNextWord();
+        }
+      };
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          try {
+            const data = JSON.parse(line.slice(6));
+
+            if (data.logs !== undefined) {
+              receivedLogs = data.logs;
+              receivedMode = data.mode;
+              setSearchResult({
+                logs: data.logs,
+                mode: data.mode,
+                answer: '',
+              });
+              setSearching(false);
+            }
+
+            if (data.text !== undefined) {
+              addToQueue(data.text);
+            }
+
+            if (data.logs_searched !== undefined) {
+              // Wait for animation queue to drain before marking done
+              const waitForQueue = () => {
+                if (wordQueue.length > 0 || animating) {
+                  setTimeout(waitForQueue, 50);
+                } else {
+                  setIsStreaming(false);
+                  setSearchResult((prev: any) => ({
+                    ...prev,
+                    answer: displayedText,
+                    logs: receivedLogs,
+                    mode: receivedMode,
+                  }));
+                }
+              };
+              waitForQueue();
+            }
+          } catch (e) {
+            // skip malformed lines
+          }
+        }
+      }
     } catch (err) {
-      console.error("Search failed:", err);
-    } finally {
+      console.error('Stream search error:', err);
       setSearching(false);
+      setIsStreaming(false);
     }
   }
   async function loadAlertRules() {
@@ -245,14 +350,19 @@ focus:outline-none focus:ring-2 focus:ring-blue-500"
             <div className="flex flex-col items-end gap-1">
               <button
                 type="submit"
-                disabled={searching}
+                disabled={searching || isStreaming}
                 className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
               >
-                {searching ? "Searching..." : "Search"}
+                {searching || isStreaming ? "Searching..." : "Search"}
               </button>
               {searching && (
                 <span className="text-xs text-gray-400 italic">
-                  Using free AI model —  this may take a few seconds
+                  Finding relevant logs...
+                </span>
+              )}
+              {isStreaming && !searching && (
+                <span className="text-xs text-gray-400 italic">
+                  AI is generating answer...
                 </span>
               )}
             </div>
@@ -260,11 +370,28 @@ focus:outline-none focus:ring-2 focus:ring-blue-500"
           {searchResult && (
             <div className="mt-4 space-y-4">
               <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
-                <p className="text-sm font-medium text-blue-900 mb-1">
-                  AI Answer
-                </p>
+                <p className="text-sm font-medium text-blue-900 mb-2">AI Answer</p>
                 <div className="text-sm text-blue-800 [&>ul]:list-disc [&>ul]:pl-4 [&>ul]:space-y-1 [&>p]:mb-2 [&>ol]:list-decimal [&>ol]:pl-4 [&>hr]:hidden [&>h2]:text-base [&>h2]:font-bold [&>h2]:mt-3 [&>h3]:text-sm [&>h3]:font-bold [&>h3]:mt-2">
-                  <ReactMarkdown>{searchResult.answer}</ReactMarkdown>
+                  {isStreaming ? (
+                    <p className="whitespace-pre-wrap break-words">
+                      {streamingAnswer || '...'}
+                      <span
+                        className="animate-pulse"
+                        style={{
+                          display: 'inline-block',
+                          width: '2px',
+                          height: '1em',
+                          backgroundColor: '#2563eb',
+                          marginLeft: '2px',
+                          verticalAlign: 'text-bottom',
+                        }}
+                      />
+                    </p>
+                  ) : (
+                    <ReactMarkdown>
+                      {searchResult?.answer || streamingAnswer}
+                    </ReactMarkdown>
+                  )}
                 </div>
               </div>
               <div className="space-y-2">

@@ -43,3 +43,42 @@ Question: ${question}`,
     );
   }
 }
+
+export async function streamSearchAnswer(
+  question: string,
+  relevantLogs: any[],
+  onChunk: (text: string) => void,
+): Promise<void> {
+  const logContext = relevantLogs
+    .map(
+      (log) =>
+        `[${log.timestamp}] [${log.level}] [${log.service}] ${log.message}`,
+    )
+    .join("\n");
+
+  try {
+    const stream = await ai.models.generateContentStream({
+      model: "gemini-3.5-flash",
+      contents: `You are a log analysis assistant. Analyze these log entries and answer the developer question concisely. Be specific about times, services, and error counts. If you cannot determine something from the logs, say so explicitly.
+
+At the end of your answer, always add a "Summary" section with 1-2 lines in very simple plain English that a non-technical person can understand. No jargon. Just what happened and how bad it is.
+
+Log entries:
+${logContext}
+
+Question: ${question}`,
+    });
+
+    for await (const chunk of stream) {
+      const text = chunk.text;
+      if (text) {
+        onChunk(text);
+      }
+    }
+  } catch (err) {
+    console.error("Stream LLM error:", err);
+    onChunk(
+      `Found ${relevantLogs.length} relevant logs. Most recent: [${relevantLogs[0]?.level}] ${relevantLogs[0]?.message}. AI summary unavailable.`,
+    );
+  }
+}
