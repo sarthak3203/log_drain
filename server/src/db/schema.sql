@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS logs (
   service       VARCHAR(100),
   timestamp     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   metadata      JSONB,
-  embedding     vector(768),
+  embedding     vector(1536),
   anomaly_score FLOAT,
   is_anomaly    BOOLEAN DEFAULT FALSE,
   fts_vector    tsvector GENERATED ALWAYS AS (

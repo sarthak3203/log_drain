@@ -43,7 +43,7 @@ async function detectAnomaliesForService(
     try {
       const raw = log.embedding as any;
       const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
-      if (!Array.isArray(parsed) || parsed.length !== 768) {
+      if (!Array.isArray(parsed) || parsed.length !== 1536) {
         console.error(`Invalid embedding dimensions for log ${log.id}`);
         continue;
       }

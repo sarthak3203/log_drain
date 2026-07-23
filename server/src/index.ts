@@ -8,6 +8,7 @@ import searchRoutes from './routes/search';
 import authRoutes from './routes/auth';
 import alertRoutes from './routes/alerts';
 import statsRoutes from './routes/stats';
+import agentRoutes from './routes/agent';
 
 const app = express();
 app.use(helmet());
@@ -27,6 +28,7 @@ app.use('/api/v1', logRoutes);
 app.use('/api/v1', searchRoutes);
 app.use('/api/v1', alertRoutes);
 app.use('/api/v1', statsRoutes);
+app.use('/api/v1', agentRoutes);
 
 app.use((err: Error, req: express.Request, res: express.Response, next: express.NextFunction) => {
   console.error('Unhandled error:', err);

@@ -22,6 +22,9 @@ export default function Dashboard() {
   const [newRuleWebhook, setNewRuleWebhook] = useState('');
   const [creatingRule, setCreatingRule] = useState(false);
   const anomaliesRef = useRef<HTMLDivElement>(null);
+  const [agentQuestion, setAgentQuestion] = useState('');
+  const [agentResult, setAgentResult] = useState<any>(null);
+  const [agentLoading, setAgentLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResult, setSearchResult] = useState<any>(null);
   const [structuredResult, setStructuredResult] = useState<any>(null);
@@ -61,6 +64,20 @@ export default function Dashboard() {
       console.error("Failed to load data:", err);
     } finally {
       setLoading(false);
+    }
+  }
+  async function handleAgentQuery(e: FormEvent) {
+    e.preventDefault();
+    if (!agentQuestion.trim()) return;
+    setAgentLoading(true);
+    setAgentResult(null);
+    try {
+      const result = await api.agentQuery(agentQuestion);
+      setAgentResult(result);
+    } catch (err) {
+      console.error('Agent query error:', err);
+    } finally {
+      setAgentLoading(false);
     }
   }
   async function handleSearch(e: FormEvent) {
@@ -323,6 +340,67 @@ export default function Dashboard() {
             </ResponsiveContainer>
           </div>
         )}
+        <div className="bg-white rounded-lg border border-purple-200 p-6">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-base">🤖</span>
+            <h2 className="text-sm font-medium text-gray-700">AI Agent</h2>
+            <span className="px-2 py-0.5 bg-purple-100 text-purple-700 text-xs rounded-full font-medium">
+              LangGraph
+            </span>
+          </div>
+          <p className="text-xs text-gray-400 mb-4">
+            Ask complex questions — the agent decides which tools to call automatically
+          </p>
+          <form onSubmit={handleAgentQuery} className="flex gap-3">
+            <input
+              type="text"
+              value={agentQuestion}
+              onChange={e => setAgentQuestion(e.target.value)}
+              placeholder="Were there any anomalies last night and what caused them?"
+              className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+            />
+            <button
+              type="submit"
+              disabled={agentLoading}
+              className="px-4 py-2 bg-purple-600 text-white text-sm rounded-lg hover:bg-purple-700 disabled:opacity-50 transition-colors"
+            >
+              {agentLoading ? 'Thinking...' : 'Ask Agent'}
+            </button>
+          </form>
+
+          {agentLoading && (
+            <div className="mt-4 flex items-center gap-2 text-sm text-gray-500">
+              <div className="w-2 h-2 bg-purple-500 rounded-full animate-bounce" />
+              <div className="w-2 h-2 bg-purple-500 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }} />
+              <div className="w-2 h-2 bg-purple-500 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }} />
+              <span>Agent is analyzing your logs...</span>
+            </div>
+          )}
+
+          {agentResult && (
+            <div className="mt-4 space-y-3">
+              {agentResult.tools_used && agentResult.tools_used.length > 0 && (
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-xs text-gray-500">Tools used:</span>
+                  {agentResult.tools_used.map((tool: string) => (
+                    <span
+                      key={tool}
+                      className="px-2 py-0.5 bg-purple-100 text-purple-700 text-xs rounded-full"
+                    >
+                      {tool.replace(/_/g, ' ')}
+                    </span>
+                  ))}
+                </div>
+              )}
+              <div className="p-4 bg-purple-50 border border-purple-200 rounded-lg">
+                <p className="text-sm font-medium text-purple-900 mb-2">Agent Answer</p>
+                <div className="text-sm text-purple-800 [&>ul]:list-disc [&>ul]:pl-4 [&>ul]:space-y-1 [&>p]:mb-2 [&>ol]:list-decimal [&>ol]:pl-4 [&>hr]:hidden [&>h2]:text-base [&>h2]:font-bold [&>h2]:mt-3 [&>h3]:text-sm [&>h3]:font-bold [&>h3]:mt-2">
+                  <ReactMarkdown>{agentResult.answer}</ReactMarkdown>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
         {/* AI Semantic Search */}
         <div className="bg-white rounded-lg border border-gray-200 p-6">
           <h2 className="text-sm font-medium text-gray-700 mb-4 flex items-center gap-2">

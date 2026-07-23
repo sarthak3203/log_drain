@@ -27,6 +27,14 @@ export const api = {
     });
     return data;
   },
+  async agentQuery(question: string) {
+    const { data } = await axios.post(
+      `${BASE_URL}/agent/query`,
+      { question },
+      { headers: getAuthHeader() }
+    );
+    return data;
+  },
   async getStats(hours = 24) {
     const { data } = await axios.get(`${BASE_URL}/stats?hours=${hours}`, {
       headers: getAuthHeader(),
