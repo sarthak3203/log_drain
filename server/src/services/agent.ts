@@ -254,6 +254,13 @@ Always use tools to get real data before answering. Never make up log data.`;
   {
     configurable: { projectId },
     recursionLimit: 8,
+    runName: 'log-analysis-agent',
+    tags: ['agent', 'log-drain', projectId],
+    metadata: {
+      projectId,
+      question,
+      timestamp: new Date().toISOString(),
+    },
   }
 );
 

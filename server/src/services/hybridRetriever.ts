@@ -1,7 +1,7 @@
 import { BaseRetriever } from '@langchain/core/retrievers';
 import { Document } from '@langchain/core/documents';
 import { CallbackManagerForRetrieverRun } from '@langchain/core/callbacks/manager';
-import { getEmbedding } from './embedding';
+import { openAIEmbeddings } from './embedding';
 import { query } from '../db';
 
 export interface HybridSearchParams {
@@ -87,7 +87,7 @@ export class LogHybridRetriever extends BaseRetriever {
 
     if (semanticEnabled) {
       // Step 1: Semantic search using pgvector
-      const queryEmbedding = await getEmbedding(query_text);
+      const queryEmbedding = await openAIEmbeddings.embedQuery(query_text);
       const queryVector = `[${queryEmbedding.join(',')}]`;
       const semanticFilters = this.buildFilterClause();
       const semanticParams = [...semanticFilters.params, queryVector, topK * 2];

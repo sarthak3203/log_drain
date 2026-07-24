@@ -1,15 +1,59 @@
-import OpenAI from 'openai';
 import 'dotenv/config';
+import OpenAI from 'openai';
+import { ChatOpenAI } from '@langchain/openai';
+import { HumanMessage, SystemMessage } from '@langchain/core/messages';
 import { Log } from '../types';
+import { z } from 'zod';
 
 if (!process.env.GEMINI_API_KEY) {
   throw new Error('GEMINI_API_KEY environment variable is required');
 }
 
-const client = new OpenAI({
-  apiKey: process.env.GEMINI_API_KEY,
+// Raw OpenAI client - only for streaming (LangChain streaming is complex)
+const streamClient = new OpenAI({
+  apiKey: process.env.GEMINI_API_KEY!,
   baseURL: process.env.AICREDITS_BASE_URL || 'https://api.aicredits.in/v1',
 });
+
+// LangChain wrapper - for all non-streaming calls, auto-traced by LangSmith
+const chatModel = new ChatOpenAI({
+  apiKey: process.env.GEMINI_API_KEY,
+  modelName: 'google/gemini-3.5-flash',
+  maxTokens: 3000,
+  configuration: {
+    baseURL: process.env.AICREDITS_BASE_URL || 'https://api.aicredits.in/v1',
+  },
+});
+
+const SYSTEM_PROMPT = `You are a log analysis assistant. Analyze these log entries and answer the developer question concisely. Be specific about times, services, and error counts. If you cannot determine something from the logs, say so explicitly.
+
+At the end of your answer, always add a "## Summary" section with 1-2 lines in very simple plain English that a non-technical person can understand. No jargon.`;
+
+export const SearchAnswerSchema = z.object({
+  answer: z.string().describe('Main analysis of the logs answering the question'),
+  severity: z.enum(['low', 'medium', 'high', 'critical']).describe('Overall severity of the issues found'),
+  affected_services: z.array(z.string()).describe('List of service names that are affected'),
+  error_count: z.number().describe('Total number of errors found'),
+  time_range: z.object({
+    start: z.string().nullable().describe('Earliest timestamp of relevant logs'),
+    end: z.string().nullable().describe('Latest timestamp of relevant logs'),
+  }),
+  summary: z.string().describe('1-2 sentence plain English summary for non-technical people'),
+  recommendations: z.array(z.string()).describe('List of 1-3 actionable recommendations'),
+});
+
+export type SearchAnswer = z.infer<typeof SearchAnswerSchema>;
+
+function extractTextFromResponse(content: any): string {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    return content
+      .filter((c: any) => c.type === 'text')
+      .map((c: any) => c.text)
+      .join('');
+  }
+  return String(content);
+}
 
 export async function generateSearchAnswer(
   question: string,
@@ -20,23 +64,11 @@ export async function generateSearchAnswer(
     .join('\n');
 
   try {
-    const response = await client.chat.completions.create({
-      model: 'google/gemini-3.5-flash',
-      messages: [
-        {
-          role: 'system',
-          content: `You are a log analysis assistant. Analyze these log entries and answer the developer question concisely. Be specific about times, services, and error counts. If you cannot determine something from the logs, say so explicitly.
-
-At the end of your answer, always add a "## Summary" section with 1-2 lines in very simple plain English that a non-technical person can understand. No jargon.`,
-        },
-        {
-          role: 'user',
-          content: `Log entries:\n${logContext}\n\nQuestion: ${question}`,
-        },
-      ],
-      max_tokens: 3000,
-    });
-    return response.choices[0]?.message?.content || 'Unable to generate answer';
+    const response = await chatModel.invoke([
+      new SystemMessage(SYSTEM_PROMPT),
+      new HumanMessage(`Log entries:\n${logContext}\n\nQuestion: ${question}`),
+    ]);
+    return extractTextFromResponse(response.content);
   } catch (err) {
     console.error('LLM answer error:', err);
     return (
@@ -57,19 +89,11 @@ export async function streamSearchAnswer(
     .join('\n');
 
   try {
-    const stream = await client.chat.completions.create({
+    const stream = await streamClient.chat.completions.create({
       model: 'google/gemini-3.5-flash',
       messages: [
-        {
-          role: 'system',
-          content: `You are a log analysis assistant. Analyze these log entries and answer the developer question concisely. Be specific about times, services, and error counts.
-
-At the end of your answer, always add a "## Summary" section with 1-2 lines in very simple plain English that a non-technical person can understand. No jargon.`,
-        },
-        {
-          role: 'user',
-          content: `Log entries:\n${logContext}\n\nQuestion: ${question}`,
-        },
+        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'user', content: `Log entries:\n${logContext}\n\nQuestion: ${question}` },
       ],
       max_tokens: 3000,
       stream: true,
@@ -92,7 +116,7 @@ At the end of your answer, always add a "## Summary" section with 1-2 lines in v
 export async function generateStructuredAnswer(
   question: string,
   relevantLogs: any[]
-): Promise<any> {
+): Promise<SearchAnswer> {
   const logContext = relevantLogs
     .map(log => `[${log.timestamp}] [${log.level}] [${log.service}] ${log.message}`)
     .join('\n');
@@ -106,30 +130,30 @@ Question: ${question}
 
 Respond with ONLY a valid JSON object, no markdown, no explanation:
 {
-  "answer": "detailed analysis",
+  "answer": "detailed analysis answering the question with specific times and counts",
   "severity": "low|medium|high|critical",
-  "affected_services": ["service1"],
+  "affected_services": ["service1", "service2"],
   "error_count": 0,
-  "time_range": { "start": "timestamp or null", "end": "timestamp or null" },
+  "time_range": {
+    "start": "earliest timestamp or null",
+    "end": "latest timestamp or null"
+  },
   "summary": "1-2 sentence plain English summary",
-  "recommendations": ["recommendation 1"]
+  "recommendations": ["recommendation 1", "recommendation 2"]
 }`;
 
   try {
-    const response = await client.chat.completions.create({
-      model: 'google/gemini-3.5-flash',
-      messages: [{ role: 'user', content: prompt }],
-      max_tokens: 800,
-    });
+    const response = await chatModel.invoke([
+      new HumanMessage(prompt),
+    ]);
 
-    const rawText = response.choices[0]?.message?.content || '';
-    // More aggressive JSON extraction
+    const rawText = extractTextFromResponse(response.content);
+
     let jsonText = rawText
       .replace(/```json\n?/g, '')
       .replace(/```\n?/g, '')
       .trim();
 
-    // Find JSON object start and end
     const jsonStart = jsonText.indexOf('{');
     const jsonEnd = jsonText.lastIndexOf('}');
     if (jsonStart !== -1 && jsonEnd !== -1) {
@@ -137,16 +161,20 @@ Respond with ONLY a valid JSON object, no markdown, no explanation:
     }
 
     const parsed = JSON.parse(jsonText);
-    return parsed;
+    const validated = SearchAnswerSchema.parse(parsed);
+    return validated;
   } catch (err) {
     console.error('Structured answer error:', err);
     return {
-      answer: `Found ${relevantLogs.length} relevant logs.`,
+      answer: `Found ${relevantLogs.length} relevant logs. Most recent: [${relevantLogs[0]?.level}] ${relevantLogs[0]?.message}.`,
       severity: 'medium',
       affected_services: [...new Set(relevantLogs.map((l: any) => l.service).filter(Boolean))],
       error_count: relevantLogs.filter((l: any) => l.level === 'ERROR').length,
-      time_range: { start: null, end: null },
-      summary: 'AI structured analysis unavailable.',
+      time_range: {
+        start: relevantLogs[relevantLogs.length - 1]?.timestamp?.toString() || null,
+        end: relevantLogs[0]?.timestamp?.toString() || null,
+      },
+      summary: 'AI structured analysis unavailable. Showing raw log results below.',
       recommendations: ['Review the relevant logs shown below for details'],
     };
   }
