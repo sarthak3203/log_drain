@@ -8,7 +8,7 @@ services:
       POSTGRES_DB: logdrain_db
       POSTGRES_HOST_AUTH_METHOD: md5
     ports:
-      - "5433:5432"
+      - "5434:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
@@ -28,7 +28,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=postgresql://logdrain:logdrain123@postgres:5433/logdrain_db
+      - DATABASE_URL=postgresql://logdrain:logdrain123@postgres:5432/logdrain_db
     depends_on:
       - postgres
     volumes:
