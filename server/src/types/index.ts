@@ -3,6 +3,7 @@ declare global {
     interface Request {
       project_id?: string;
       api_key_id?: string;
+      user_id?: string;
     }
   }
 }
@@ -15,7 +16,7 @@ export interface Log {
   service: string;
   timestamp: Date;
   metadata: Record<string, any>;
-  embedding?: number[]; // 384-element array when populated
+  embedding?: number[]; // 1536-element array when populated (text-embedding-3-small)
   anomaly_score?: number;
   is_anomaly?: boolean;
 }
@@ -28,8 +29,16 @@ export interface LogInput {
 }
 export interface Project {
   id: string;
+  owner_id: string;
   name: string;
   created_at: Date;
+}
+export interface User {
+  id: string;
+  email: string;
+  name?: string | null;
+  created_at: Date;
+  updated_at: Date;
 }
 export interface ApiKey {
   id: string;
@@ -58,4 +67,8 @@ export interface AlertRule {
 export interface AuthenticatedRequest extends Express.Request {
   project_id: string;
   api_key_id: string;
+}
+
+export interface AuthenticatedUserRequest extends Express.Request {
+  user_id: string;
 }

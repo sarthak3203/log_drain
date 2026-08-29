@@ -36,6 +36,17 @@ error_rate_pct
  GROUP BY service`,
     [project_id],
   );
+  // Project-wide error rate for the dashboard summary card.
+  const [projectErrorRate] = await query(
+    `SELECT
+       COUNT(*) FILTER (WHERE level = 'ERROR') as errors,
+       COUNT(*) as total,
+       COALESCE(ROUND(COUNT(*) FILTER (WHERE level = 'ERROR') * 100.0 / NULLIF(COUNT(*), 0), 2), 0) as error_rate_pct
+     FROM logs
+     WHERE project_id = $1
+       AND timestamp > NOW() - INTERVAL '24 hours'`,
+    [project_id],
+  );
   // Recent anomaly count
   const anomalies = await query(
     `SELECT COUNT(*) as count
@@ -48,6 +59,7 @@ error_rate_pct
   res.json({
     volume_by_hour: volumeStats,
     error_rates: errorRates,
+    project_error_rate_24h: projectErrorRate,
     anomaly_count_24h: anomalies[0]?.count || 0,
   });
 });

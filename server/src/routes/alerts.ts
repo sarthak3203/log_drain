@@ -2,6 +2,7 @@ import { Router } from 'express';
 import axios from 'axios';
 import { apiKeyAuth } from '../middleware/apiKey';
 import { query } from '../db';
+import { validateWebhookUrl, WebhookUrlError } from '../utils/webhookUrl';
 const router = Router();
 // Create an alert rule
 router.post('/alert-rules', apiKeyAuth, async (req, res) => {
@@ -10,12 +11,22 @@ router.post('/alert-rules', apiKeyAuth, async (req, res) => {
  if (!condition) {
  return res.status(400).json({ error: 'Condition is required' });
  }
+
+ let safeNotifyUrl: string | null = null;
+ if (notify_url !== undefined && notify_url !== null && notify_url !== '') {
+  try {
+   safeNotifyUrl = (await validateWebhookUrl(notify_url)).toString();
+  } catch (err) {
+   const message = err instanceof WebhookUrlError ? err.message : 'Invalid webhook URL';
+   return res.status(400).json({ error: message });
+  }
+ }
  const [rule] = await query(
  `INSERT INTO alert_rules (project_id, name, condition, service, notify_url,
 notify_email)
  VALUES ($1, $2, $3, $4, $5, $6)
  RETURNING *`,
- [project_id, name, JSON.stringify(condition), service, notify_url, notify_email]
+ [project_id, name, JSON.stringify(condition), service, safeNotifyUrl, notify_email]
  );
  res.status(201).json(rule);
 });
@@ -61,14 +72,16 @@ export async function fireAlert(
  // Fire webhook
  if (rule.notify_url) {
  try {
- await axios.post(rule.notify_url, {
+ const safeNotifyUrl = await validateWebhookUrl(rule.notify_url);
+ await axios.post(safeNotifyUrl.toString(), {
  rule_name: rule.name,
  project_id: projectId,
  fired_at: new Date().toISOString(),
  details,
- }, { timeout: 5000 });
+ }, { timeout: 5000, maxRedirects: 0 });
  } catch (err) {
- console.error('Webhook delivery failed:', err);
+ const message = err instanceof Error ? err.message : String(err);
+ console.error('Webhook delivery blocked or failed:', message);
  }
  }
 }

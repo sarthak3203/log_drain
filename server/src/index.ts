@@ -9,8 +9,10 @@ import authRoutes from './routes/auth';
 import alertRoutes from './routes/alerts';
 import statsRoutes from './routes/stats';
 import agentRoutes from './routes/agent';
+import { generalApiLimiter } from './middleware/rateLimiter';
 
 const app = express();
+app.set('trust proxy', 1);
 app.use(helmet());
 app.use(cors({
   origin: process.env.FRONTEND_URL || 'http://localhost:5173',
@@ -23,6 +25,7 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+app.use('/api/v1', generalApiLimiter);
 app.use('/api/v1', authRoutes);
 app.use('/api/v1', logRoutes);
 app.use('/api/v1', searchRoutes);

@@ -1,0 +1,6 @@
+# Replace VM_IP below with your VM's actual external IP address,
+# using dashes instead of dots (e.g. 34.123.45.67 becomes 34-123-45-67).
+
+VM_IP.nip.io {
+    reverse_proxy client:80
+}

@@ -3,16 +3,24 @@ import { query } from "../db";
 import { getBatchEmbeddings } from "../services/embedding";
 const redis = new Redis(process.env.REDIS_URL!);
 const BATCH_SIZE = 100; // embed 100 logs at a time
-const WORKER_INTERVAL = 10000; // run every 5 seconds
+const WORKER_INTERVAL = 10000; // run every 10 seconds
 export async function processEmbeddings(): Promise<void> {
-  const items: Array<{ log_id: number; message: string }> = [];
+  const items: Array<{ log_id: number; project_id: string; message: string }> = [];
   try {
     // Grab up to BATCH_SIZE items from the embedding queue
     for (let i = 0; i < BATCH_SIZE; i++) {
       const raw = await redis.lpop('embedding_queue');
       if (!raw) break;
       try {
-        items.push(JSON.parse(raw));
+        const item = JSON.parse(raw) as { log_id?: number; project_id?: string; message?: string };
+        if (
+          typeof item.log_id !== 'number' ||
+          typeof item.project_id !== 'string' ||
+          typeof item.message !== 'string'
+        ) {
+          throw new Error('Embedding queue item is missing log_id, project_id, or message');
+        }
+        items.push({ log_id: item.log_id, project_id: item.project_id, message: item.message });
       } catch (e) {
         console.error('Skipping malformed embedding queue item:', raw);
       }
@@ -32,9 +40,10 @@ export async function processEmbeddings(): Promise<void> {
         continue;
       }
       const vectorStr = `[${embeddings[i].join(",")}]`;
-      await query(`UPDATE logs SET embedding = $1 WHERE id = $2`, [
+      await query(`UPDATE logs SET embedding = $1 WHERE id = $2 AND project_id = $3`, [
         vectorStr,
         items[i].log_id,
+        items[i].project_id,
       ]);
     }
     console.log(`Embedded ${items.length} logs`);

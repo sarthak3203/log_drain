@@ -1,6 +1,8 @@
 import { Router } from "express";
 import { Redis } from "ioredis";
+import { v4 as uuidv4 } from 'uuid';
 import { apiKeyAuth } from "../middleware/apiKey";
+import { ingestionLimiter } from '../middleware/rateLimiter';
 import { query } from "../db";
 import { LogInput } from "../types";
 const router = Router();
@@ -8,7 +10,7 @@ const redis = new Redis(process.env.REDIS_URL!);
 // POST /api/v1/logs
 // Accepts single log or array of logs
 // Returns 202 Accepted immediately — does NOT wait for DB write
-router.post("/logs", apiKeyAuth, async (req, res) => {
+router.post("/logs", ingestionLimiter, apiKeyAuth, async (req, res) => {
   const project_id = req.project_id;
   const body = req.body;
   // Normalize: accept both single log and array
@@ -34,6 +36,7 @@ router.post("/logs", apiKeyAuth, async (req, res) => {
     const pipeline = redis.pipeline();
     for (const log of logs) {
       const entry = JSON.stringify({
+        ingestion_id: uuidv4(),
         project_id,
         level: log.level || "INFO",
         message: log.message,

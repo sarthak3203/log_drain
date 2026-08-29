@@ -105,18 +105,15 @@ async function detectAnomaliesForService(
 
       // Fire alert rules
       try {
-        const activeRules = await query<{
-          id: string;
-          project_id: string;
-          notify_url: string;
-          notify_email: string;
-        }>(
-          `SELECT id, project_id, notify_url, notify_email
+        // A null or blank service intentionally matches anomalies from all services.
+        const activeRules = await query<{ id: string }>(
+          `SELECT id
            FROM alert_rules
            WHERE project_id = $1
              AND active = TRUE
-             AND (condition->>'type' = 'anomaly')`,
-          [project_id]
+             AND (condition->>'type' = 'anomaly')
+             AND (service IS NULL OR BTRIM(service) = '' OR service = $2)`,
+          [project_id, service]
         );
 
         for (const rule of activeRules) {

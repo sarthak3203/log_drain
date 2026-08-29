@@ -1,5 +1,6 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import ReactMarkdown from 'react-markdown';
-import { useState, useEffect, useRef, type FormEvent } from "react";
+import { useState, useEffect, useRef, useCallback, type FormEvent } from "react";
 import {
   BarChart,
   Bar,
@@ -9,8 +10,9 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import { Search, AlertTriangle, Activity, Server } from "lucide-react";
-import { api } from "../utils/api";
+import { useSession } from '../context/SessionContext';
 export default function Dashboard() {
+  const { api } = useSession();
   const [logs, setLogs] = useState<any[]>([]);
   const [stats, setStats] = useState<any>(null);
   const [services, setServices] = useState<any[]>([]);
@@ -35,17 +37,10 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [levelFilter, setLevelFilter] = useState("");
   const [serviceFilter, setServiceFilter] = useState("");
-  useEffect(() => {
-    loadData();
-    loadAlertRules();
-    // Poll for new logs every 10 seconds
-    const interval = setInterval(loadData, 10000);
-    return () => clearInterval(interval);
-  }, [levelFilter, serviceFilter]);
   const scrollToAnomalies = () => {
     anomaliesRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
-  async function loadData() {
+  const loadData = useCallback(async () => {
     try {
       const params: Record<string, string> = {};
       if (levelFilter) params.level = levelFilter;
@@ -65,7 +60,7 @@ export default function Dashboard() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [api, levelFilter, serviceFilter]);
   async function handleAgentQuery(e: FormEvent) {
     e.preventDefault();
     if (!agentQuestion.trim()) return;
@@ -95,22 +90,8 @@ export default function Dashboard() {
       .then(result => setStructuredResult(result))
       .catch(err => console.error('Background structured search error:', err));
 
-    const apiKey = localStorage.getItem('api_key');
-    const params = new URLSearchParams({
-      q: searchQuery,
-      mode: searchMode,
-    });
-
     try {
-      const response = await fetch(
-        `http://localhost:3000/api/v1/search/stream?${params.toString()}`,
-        {
-          headers: {
-            'Authorization': `Bearer ${apiKey}`,
-            'Accept': 'text/event-stream',
-          },
-        }
-      );
+      const response = await api.streamSearch(searchQuery, { mode: searchMode });
 
       if (!response.ok) throw new Error('Search failed');
 
@@ -191,7 +172,7 @@ export default function Dashboard() {
               };
               waitForQueue();
             }
-          } catch (e) {
+          } catch {
             // skip malformed lines
           }
         }
@@ -202,14 +183,27 @@ export default function Dashboard() {
       setIsStreaming(false);
     }
   }
-  async function loadAlertRules() {
+  const loadAlertRules = useCallback(async () => {
     try {
       const data = await api.getAlertRules();
       setAlertRules(data || []);
     } catch (err) {
       console.error('Failed to load alert rules:', err);
     }
-  }
+  }, [api]);
+
+  useEffect(() => {
+    const initialLoad = window.setTimeout(() => {
+      void loadData();
+      void loadAlertRules();
+    }, 0);
+    // Poll for new logs every 10 seconds
+    const interval = setInterval(() => void loadData(), 10000);
+    return () => {
+      window.clearTimeout(initialLoad);
+      clearInterval(interval);
+    };
+  }, [loadAlertRules, loadData]);
 
   async function handleCreateAlertRule(e: FormEvent) {
     e.preventDefault();
@@ -255,28 +249,13 @@ export default function Dashboard() {
   };
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <main className="max-w-7xl mx-auto px-6 py-8 flex items-center justify-center">
         <div className="text-gray-500">Loading dashboard...</div>
-      </div>
+      </main>
     );
   }
   return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="bg-white border-b border-gray-200 px-6 py-4">
-        <div className="max-w-7xl mx-auto flex items-center justify-between">
-          <div>
-            <h1 className="text-xl font-semibold text-gray-900">Log Drain</h1>
-            <p className="text-sm text-gray-500">AI-powered log analysis</p>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="inline-flex items-center gap-1.5 text-sm text-green-600">
-              <span className="w-2 h-2 bg-green-500 rounded-full"></span>
-              Live
-            </span>
-          </div>
-        </div>
-      </header>
-      <main className="max-w-7xl mx-auto px-6 py-8 space-y-8">
+    <main className="max-w-7xl mx-auto px-6 py-8 space-y-8">
         {/* Stat Cards */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <div className="bg-white rounded-lg border border-gray-200 p-4">
@@ -314,10 +293,10 @@ export default function Dashboard() {
           </div>
           <div className="bg-white rounded-lg border border-gray-200 p-4">
             <div className="flex items-center gap-2 text-gray-500 text-sm mb-1">
-              Error rate
+              Project error rate (24h)
             </div>
             <div className="text-2xl font-semibold text-gray-900">
-              {stats?.error_rates?.[0]?.error_rate_pct || 0}%
+              {stats?.project_error_rate_24h?.error_rate_pct ?? 0}%
             </div>
           </div>
         </div>
@@ -677,8 +656,7 @@ focus:outline-none focus:ring-2 focus:ring-blue-500"
             </div>
           </div>
         )}
-      </main>
-    </div>
+    </main>
   );
 }
 function LogRow({
