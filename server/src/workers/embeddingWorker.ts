@@ -1,16 +1,14 @@
-import { Redis } from "ioredis";
 import { query } from "../db";
 import { getBatchEmbeddings } from "../services/embedding";
-const redis = new Redis(process.env.REDIS_URL!);
+import { redis } from '../redis';
 const BATCH_SIZE = 100; // embed 100 logs at a time
 const WORKER_INTERVAL = 10000; // run every 10 seconds
 export async function processEmbeddings(): Promise<void> {
   const items: Array<{ log_id: number; project_id: string; message: string }> = [];
   try {
-    // Grab up to BATCH_SIZE items from the embedding queue
-    for (let i = 0; i < BATCH_SIZE; i++) {
-      const raw = await redis.lpop('embedding_queue');
-      if (!raw) break;
+    // Grab up to BATCH_SIZE items in one Redis request.
+    const rawItems = await redis.lpop('embedding_queue', BATCH_SIZE);
+    for (const raw of rawItems || []) {
       try {
         const item = JSON.parse(raw) as { log_id?: number; project_id?: string; message?: string };
         if (

@@ -1,12 +1,11 @@
 import { Router } from "express";
-import { Redis } from "ioredis";
 import { v4 as uuidv4 } from 'uuid';
 import { apiKeyAuth } from "../middleware/apiKey";
 import { ingestionLimiter } from '../middleware/rateLimiter';
 import { query } from "../db";
+import { redis } from '../redis';
 import { LogInput } from "../types";
 const router = Router();
-const redis = new Redis(process.env.REDIS_URL!);
 // POST /api/v1/logs
 // Accepts single log or array of logs
 // Returns 202 Accepted immediately — does NOT wait for DB write

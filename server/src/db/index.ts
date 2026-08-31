@@ -1,23 +1,64 @@
 import 'dotenv/config';
 import { Pool } from "pg";
-if (!process.env.DATABASE_URL) {
+const databaseUrl = process.env.DATABASE_URL;
+
+if (!databaseUrl) {
   throw new Error('DATABASE_URL environment variable is required');
 }
-// Connection pool: reuses connections instead of creating a new one per query
-// Max 20 connections is a safe default; tune based on your Postgres max_connections
+
+function getPositiveInteger(name: string, fallback: number): number {
+  const value = Number.parseInt(process.env[name] || '', 10);
+  return Number.isSafeInteger(value) && value > 0 ? value : fallback;
+}
+
+function requiresChannelBinding(connectionString: string): boolean {
+  try {
+    return new URL(connectionString).searchParams.get('channel_binding') === 'require';
+  } catch {
+    return false;
+  }
+}
+
+function getConnectionConfig(connectionString: string): {
+  connectionString: string;
+  ssl?: { rejectUnauthorized: true };
+} {
+  const url = new URL(connectionString);
+  const sslMode = url.searchParams.get('sslmode')?.toLowerCase();
+  const isNeon = url.hostname.endsWith('.neon.tech');
+  const requiresTls = isNeon || (sslMode !== undefined && sslMode !== 'disable');
+
+  if (!requiresTls) return { connectionString };
+
+  // node-postgres reparses connectionString after applying Pool options. Remove
+  // URL SSL settings so they cannot replace this explicitly verified TLS config.
+  url.searchParams.delete('sslmode');
+  url.searchParams.delete('ssl');
+  return {
+    connectionString: url.toString(),
+    ssl: { rejectUnauthorized: true },
+  };
+}
+
+const connectionConfig = getConnectionConfig(databaseUrl);
+
+// Neon pooled connections are shared by the API and worker, so keep the
+// per-process default conservative and allow deployments to tune it explicitly.
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  max: 20,
+  ...connectionConfig,
+  max: getPositiveInteger('PG_POOL_MAX', 5),
   idleTimeoutMillis: 30000, // close idle connections after 30s
-  connectionTimeoutMillis: 2000, // fail fast if we can't get a connection
+  connectionTimeoutMillis: getPositiveInteger('PG_CONNECTION_TIMEOUT_MS', 10000),
+  // node-postgres does not map channel_binding in a connection string to this
+  // option. Enable SCRAM channel binding when the supplied Neon URL requires it.
+  enableChannelBinding: requiresChannelBinding(databaseUrl),
 });
 // The pool creates clients lazily; this fires each time a new pooled client is opened.
 pool.on("connect", () => {
   console.log("Postgres pool opened a new client connection");
 });
 pool.on("error", (err) => {
-  console.error("Unexpected Postgres error:", err);
-  process.exit(1);
+  console.error("Unexpected idle Postgres pool error; the pool will reconnect:", err);
 });
 export const db = pool;
 // Helper: run a query with automatic error logging
