@@ -3,6 +3,15 @@ import { Document } from '@langchain/core/documents';
 import { CallbackManagerForRetrieverRun } from '@langchain/core/callbacks/manager';
 import { openAIEmbeddings } from './embedding';
 import { query } from '../db';
+import { performance } from 'node:perf_hooks';
+
+const timingEnabled = process.env.DEBUG_TIMING === 'true';
+
+function startTiming(label: string): () => void {
+  if (!timingEnabled) return () => undefined;
+  const startedAt = performance.now();
+  return () => console.log(`[DEBUG_TIMING] ${label}: ${(performance.now() - startedAt).toFixed(3)} ms`);
+}
 
 export interface HybridSearchParams {
   projectId: string;
@@ -87,13 +96,16 @@ export class LogHybridRetriever extends BaseRetriever {
 
     if (semanticEnabled) {
       // Step 1: Semantic search using pgvector
+      const endEmbedding = startTiming('structured search: query embedding generation');
       const queryEmbedding = await openAIEmbeddings.embedQuery(query_text);
+      endEmbedding();
       const queryVector = `[${queryEmbedding.join(',')}]`;
       const semanticFilters = this.buildFilterClause();
       const semanticParams = [...semanticFilters.params, queryVector, topK * 2];
       const vectorParam = `$${semanticFilters.params.length + 1}`;
       const limitParam = `$${semanticFilters.params.length + 2}`;
 
+      const endVectorQuery = startTiming('structured search: vector database query');
       semanticResults = await query<{
         id: number;
         level: string;
@@ -112,6 +124,7 @@ export class LogHybridRetriever extends BaseRetriever {
          LIMIT ${limitParam}`,
         semanticParams
       );
+      endVectorQuery();
     }
 
     if (keywordEnabled) {
@@ -121,6 +134,7 @@ export class LogHybridRetriever extends BaseRetriever {
       const tsQueryParam = `$${keywordFilters.params.length + 1}`;
       const limitParam = `$${keywordFilters.params.length + 2}`;
 
+      const endKeywordQuery = startTiming('structured search: keyword database query');
       bm25Results = await query<{
         id: number;
         level: string;
@@ -139,6 +153,7 @@ export class LogHybridRetriever extends BaseRetriever {
          LIMIT ${limitParam}`,
         keywordParams
       );
+      endKeywordQuery();
     }
 
     // Step 3: Reciprocal Rank Fusion (RRF)
@@ -172,9 +187,11 @@ export class LogHybridRetriever extends BaseRetriever {
     });
 
     // Step 4: Sort by combined RRF score and take topK
+    const endRrf = startTiming('structured search: RRF merge and sort');
     const sortedResults = Array.from(rrfScores.values())
       .sort((a, b) => b.score - a.score)
       .slice(0, topK);
+    endRrf();
 
     // Step 5: Convert to LangChain Documents
     return sortedResults.map(({ score, log }) =>

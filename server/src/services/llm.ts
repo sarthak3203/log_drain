@@ -4,6 +4,15 @@ import { ChatOpenAI } from '@langchain/openai';
 import { HumanMessage, SystemMessage } from '@langchain/core/messages';
 import { Log } from '../types';
 import { z } from 'zod';
+import { performance } from 'node:perf_hooks';
+
+const timingEnabled = process.env.DEBUG_TIMING === 'true';
+
+function startTiming(label: string): () => void {
+  if (!timingEnabled) return () => undefined;
+  const startedAt = performance.now();
+  return () => console.log(`[DEBUG_TIMING] ${label}: ${(performance.now() - startedAt).toFixed(3)} ms`);
+}
 
 if (!process.env.GEMINI_API_KEY) {
   throw new Error('GEMINI_API_KEY environment variable is required');
@@ -143,9 +152,11 @@ Respond with ONLY a valid JSON object, no markdown, no explanation:
 }`;
 
   try {
+    const endLlmCall = startTiming('structured search: LLM call');
     const response = await chatModel.invoke([
       new HumanMessage(prompt),
     ]);
+    endLlmCall();
 
     const rawText = extractTextFromResponse(response.content);
 
