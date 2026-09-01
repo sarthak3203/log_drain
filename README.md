@@ -1,322 +1,131 @@
 # Log Drain
 
-AI-powered log analysis platform. Send logs from any application 
-with one HTTP call — search them in plain English, detect anomalies 
-automatically, and get instant AI-generated answers about what went wrong.
+AI-powered log observability platform that turns application logs into searchable, actionable insights. Send logs through a project-scoped API, investigate incidents in natural language, detect anomalies, and manage alerts from a single dashboard.
 
-> Built to demonstrate production-grade AI engineering: hybrid search, 
-> streaming LLM responses, LangGraph agents, and ML anomaly detection 
-> across a polyglot Node.js + Python architecture.
+**Deployment:** AWS EC2 · Docker Compose · Caddy · Neon PostgreSQL/pgvector · Upstash Redis
 
----
+## Live application
 
-## Live Demo
+| Resource | Link |
+| --- | --- |
+| Frontend / Dashboard | [13-233-126-133.nip.io](https://13-233-126-133.nip.io/) |
+| Backend API | [13-233-126-133.nip.io/api/v1](https://13-233-126-133.nip.io/api/v1) |
 
-> Dashboard: [your-render-url]  
-> ML Service: [your-render-url/docs]
+## What it demonstrates
 
----
-
-## What It Does
-
-Instead of searching logs with keywords like `level=ERROR AND message LIKE '%database%'`, you ask in plain English:
-
-> *"Show me database connection failures from last night"*
-
-The system understands meaning — not just keywords. It finds all relevant logs even if they use different words, then generates a plain-English summary with severity, affected services, and recommendations.
-
----
-
-## Key Features
-
-| Feature | Description |
-|---|---|
-| 🔍 **Hybrid Search** | BM25 keyword + semantic vector search combined with Reciprocal Rank Fusion |
-| 🤖 **AI Agent** | LangGraph ReAct agent that calls multiple tools automatically to answer complex questions |
-| ⚡ **Streaming Answers** | LLM responses stream word-by-word via Server-Sent Events |
-| 📊 **Structured Output** | Zod-validated AI responses with severity, error count, and recommendations |
-| 🧠 **Anomaly Detection** | IsolationForest ML model in a Python FastAPI microservice detects unusual logs |
-| 📡 **Observability** | Full LangSmith tracing of every agent step, tool call, and LLM decision |
-| 🚀 **Buffered Ingestion** | Redis buffer + bulk PostgreSQL insert handles log storms without DB pressure |
-
----
+- **Production-style ingestion:** logs are queued in Redis and processed asynchronously, returning `202 Accepted` without waiting for database or AI work.
+- **Reliable background processing:** distributed worker lock, idempotent writes, retryable queues, dead-letter handling, batched embeddings, and 30-day retention.
+- **Hybrid AI search:** pgvector semantic search plus PostgreSQL full-text search, ranked with Reciprocal Rank Fusion (RRF).
+- **AI investigation:** streamed answers, structured incident summaries, and a LangGraph agent with search, statistics, anomaly, and service-discovery tools.
+- **ML anomaly detection:** a Python/FastAPI microservice runs IsolationForest against recent service embeddings every five minutes.
+- **Secure multi-project access:** JWT user sessions, bcrypt-hashed API keys, ownership-scoped projects, revocation, CORS, Helmet, and rate limiting.
 
 ## Architecture
 
-Your App → POST /logs → Redis Buffer → Postgres + pgvector
-↓
-Embedding Worker (OpenAI)
-↓
-Anomaly Worker → Python FastAPI (IsolationForest)
+```text
+Application --> Express API --> Upstash Redis --> Worker --> Neon PostgreSQL + pgvector
+                                                         |
+                                                         +--> Embeddings + IsolationForest ML service
 
-User → Search Query → LangChain Hybrid Retriever → Gemini LLM → Answer
-User → Agent Question → LangGraph Agent → Tools → Synthesized Answer
-↓
-LangSmith Traces
-
-
-**Three separate processes:**
-- **API Server** (Node.js + Express) — handles all HTTP requests
-- **Worker Process** (Node.js) — flush, embedding, anomaly detection, retention
-- **ML Service** (Python + FastAPI) — IsolationForest anomaly scoring
-
----
-
-## Tech Stack
-
-### Backend
-![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white)
-![Node.js](https://img.shields.io/badge/Node.js-339933?logo=node.js&logoColor=white)
-![Express](https://img.shields.io/badge/Express-000000?logo=express&logoColor=white)
-![LangChain](https://img.shields.io/badge/LangChain-1C3C3C?logo=langchain&logoColor=white)
-![LangGraph](https://img.shields.io/badge/LangGraph-1C3C3C?logo=langchain&logoColor=white)
-
-### ML & AI
-![Python](https://img.shields.io/badge/Python-3776AB?logo=python&logoColor=white)
-![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
-![scikit-learn](https://img.shields.io/badge/scikit--learn-F7931E?logo=scikit-learn&logoColor=white)
-![OpenAI](https://img.shields.io/badge/OpenAI_Compatible-412991?logo=openai&logoColor=white)
-
-### Database & Infrastructure
-![PostgreSQL](https://img.shields.io/badge/PostgreSQL_+_pgvector-4169E1?logo=postgresql&logoColor=white)
-![Redis](https://img.shields.io/badge/Redis-DC382D?logo=redis&logoColor=white)
-![Docker](https://img.shields.io/badge/Docker-2496ED?logo=docker&logoColor=white)
-
-### Frontend
-![React](https://img.shields.io/badge/React_19-61DAFB?logo=react&logoColor=111)
-![Tailwind](https://img.shields.io/badge/Tailwind_CSS-06B6D4?logo=tailwindcss&logoColor=white)
-
----
-
-## How Hybrid Search Works
-
-Most log search tools use exact keyword matching. This misses logs 
-phrased differently but meaning the same thing.
-
-This project combines two retrieval methods and merges them using 
-Reciprocal Rank Fusion:
-
-Query: "database connection failures"
-↓
-┌─────────────────────┐ ┌──────────────────────────┐
-│ Semantic Search │ │ BM25 Keyword Search │
-│ (pgvector HNSW) │ │ (PostgreSQL tsvector) │
-│ │ │ │
-│ Finds: "DB down" │ │ Finds: "database" │
-│ "postgres refused" │ │ exact matches │
-│ "connection failed"│ │ │
-└─────────────────────┘ └──────────────────────────┘
-↓
-Reciprocal Rank Fusion (RRF)
-↓
-Best 10 results, ranked by combined relevance
-↓
-Gemini LLM generates plain-English answer
-
-
----
-
-## How the AI Agent Works
-
-When you ask a complex question like *"Were there anomalies last 
-night and what caused them?"*, the LangGraph agent decides what 
-to do:
-
-Question
-↓
-Agent thinks: "I need stats AND anomaly data"
-↓
-Calls get_stats tool → Calls check_anomalies tool
-↓ ↓
-Gets error rates Gets flagged logs with scores
-↓
-Agent synthesizes comprehensive answer
-↓
-LangSmith records every step (visible at smith.langchain.com)
-
-
-**Available tools:**
-- `search_logs` — hybrid search over log messages
-- `get_stats` — error rates and log volume by service
-- `check_anomalies` — fetch ML-flagged anomalous logs
-- `get_services` — list active services and last activity
-
----
-
-## Anomaly Detection Pipeline
-
-Every 5 minutes:
-
-Node.js worker
-↓
-Fetches last 200 embeddings per service from Postgres
-↓
-POST /detect-anomalies → Python FastAPI
-↓
-IsolationForest fits on normalized embeddings (sklearn)
-↓
-Returns per-log anomaly scores (0-1 scale)
-↓
-Node.js marks anomalous logs in Postgres
-↓
-Fires webhook alerts if rules configured
-
-
-**Why IsolationForest over simple centroid detection:**
-Centroid-based detection assumes one "normal" pattern. 
-IsolationForest handles multiple normal patterns — for example, 
-a service that behaves differently during business hours vs 
-overnight batch jobs.
-
----
-
-## Ingestion Architecture
-
-The ingestion endpoint returns `202 Accepted` in under 5ms 
-regardless of database load:
-
-POST /logs
-↓ (< 5ms)
-Redis RPUSH (log_buffer)
-↓ 202 Accepted returned immediately
-
-Every 2 seconds:
-Redis LRANGE → Bulk INSERT → Postgres
-Redis LTRIM (only after successful commit)
-↓
-IDs pushed to embedding_queue
-↓
-Embedding worker processes 100 at a time
-
-
-This handles log storms (5,000+ logs/second) without 
-overwhelming Postgres.
-
----
-
-## Key Engineering Decisions
-
-**Why pgvector instead of Pinecone?**
-Keeping vectors in Postgres means filtering by `service`, `level`, 
-and time range happens in the same query as similarity search. 
-With a separate vector DB you'd need two round trips and a join 
-in application code.
-
-**Why HNSW over IVFFlat?**
-HNSW gives better recall and faster queries. IVFFlat requires 
-tuning `lists` and `probes` parameters and degrades on small datasets.
-
-**Why Python for anomaly detection?**
-scikit-learn, NumPy, and scipy are the standard stack for this. 
-Running it as a separate FastAPI microservice keeps Python 
-dependencies out of the Node.js runtime and reflects how real 
-AI companies separate API/business logic (Node.js/Go) from 
-ML workloads (Python).
-
-**Why LangChain wrappers instead of raw OpenAI SDK?**
-Using `ChatOpenAI` and `OpenAIEmbeddings` from LangChain means 
-LangSmith automatically traces every LLM and embedding call — 
-zero extra instrumentation code needed.
-
-**Why cursor pagination over offset?**
-`WHERE id < last_id LIMIT 50` uses the B-tree index directly. 
-`OFFSET 1000` scans and discards 1000 rows first — O(n) 
-that gets slower as you page deeper.
-
----
-
-## Running Locally
-
-### Prerequisites
-- Node.js 20+
-- Docker Desktop
-- An OpenAI-compatible API key (aicredits.in works with UPI payment)
-
-### Setup
-
-```bash
-# 1. Clone and start infrastructure
-git clone <repo-url>
-cd log_drain/server
-docker compose up -d
-
-# 2. Apply database schema  
-Get-Content src/db/schema.sql | docker exec -i logdrain-postgres psql -U logdrain -d logdrain_db
-
-# 3. Configure environment
-# Create server/.env with your API keys (see .env.example)
-
-# 4. Install dependencies
-cd server && npm install
-cd ../client && npm install
-
-# 5. Run everything
-# Terminal 1:
-cd server && npm run dev
-
-# Terminal 2:
-cd server && npm run worker
-
-# Terminal 3:
-cd client && npm run dev
+Browser --> Caddy (HTTPS) --> React dashboard / Nginx --> Express API
 ```
 
-Open `http://localhost:5173` → Create project → Get API key → Send logs
+The EC2 Compose stack runs schema migration, API, worker, dashboard, ML service, and Caddy. Neon PostgreSQL and Upstash Redis are managed external services.
 
----
+## Tech stack
 
-## Sending Your First Log
+| Layer | Technology |
+| --- | --- |
+| Frontend | React 19, TypeScript, Vite, Tailwind CSS, Recharts |
+| Backend | Node.js 20, Express 5, TypeScript |
+| AI | LangChain, LangGraph, OpenAI-compatible LLM and embeddings |
+| ML | Python 3.11, FastAPI, scikit-learn |
+| Data & deployment | Neon PostgreSQL, pgvector, Upstash Redis, Docker Compose, Caddy, AWS EC2 |
+
+## Send logs
+
+```text
+POST https://13-233-126-133.nip.io/api/v1/logs
+```
+
+Create a project in the dashboard and save its API key. Use it to send a log:
 
 ```bash
-curl -X POST http://localhost:3000/api/v1/logs \
-  -H "Authorization: Bearer log_your_key_here" \
+curl -X POST https://13-233-126-133.nip.io/api/v1/logs \
+  -H "Authorization: Bearer log_your_project_api_key" \
   -H "Content-Type: application/json" \
-  -d '{"level":"ERROR","message":"Database connection refused","service":"payment-api"}'
+  -d '{
+    "level": "ERROR",
+    "message": "Database connection refused",
+    "service": "payment-api",
+    "metadata": { "requestId": "req_123" }
+  }'
 ```
 
-Then search at `http://localhost:5173`:
-> *"show me database connection failures"*
+`message` is required. `level`, `service`, `timestamp`, and `metadata` are optional. The endpoint accepts either one log object or an array of up to 1,000 logs.
 
----
+## Selected API endpoints
 
-## Project Structure
+All project-data endpoints require `Authorization: Bearer <project-api-key>`.
 
-log_drain/
-├── client/ # React 19 dashboard (Vite + Tailwind)
-├── server/
-│ ├── src/
-│ │ ├── routes/ # Express API endpoints
-│ │ ├── services/ # Embedding, LLM, hybrid retriever, agent
-│ │ ├── workers/ # Flush, embedding, anomaly, retention
-│ │ └── db/ # Postgres pool + schema
-│ └── docker-compose.yml
-└── python-ml/ # FastAPI + scikit-learn ML service
-├── app/main.py
-├── requirements.txt
-└── Dockerfile
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| `POST` | `/auth/register`, `/auth/login` | User account access and session JWTs |
+| `POST` | `/projects` | Create a project and its first API key |
+| `POST` / `GET` | `/logs` | Asynchronous ingestion and filtered log retrieval |
+| `GET` | `/search`, `/search/stream`, `/search/structured` | Hybrid AI search and analysis |
+| `POST` | `/agent/query` | Agent-led log investigation |
+| `GET` | `/stats`, `/services` | Operational metrics and active services |
+| `GET` / `POST` | `/alert-rules` | Anomaly alert management |
 
+## Run locally
 
----
+**Prerequisites:** Node.js 20+, Docker Compose, and an OpenAI-compatible API key.
 
-## What I Learned Building This
+```bash
+# Configure the API (set DATABASE_URL, GEMINI_API_KEY, and JWT_SECRET)
+cp server/.env.example server/.env
 
-- Returning `202 Accepted` after Redis enqueue makes ingestion fast 
-  but introduces eventual consistency — logs are searchable only 
-  after the flush and embedding workers run
-- Hybrid search with RRF gives meaningfully better results than 
-  either semantic or keyword search alone — especially for technical 
-  log messages that mix domain terms with natural language
-- LangGraph's stateful graph model is the right abstraction for 
-  multi-step tool-calling agents where the next tool depends on 
-  the previous result
-- Zod validation on LLM outputs is necessary in production — 
-  models occasionally return malformed JSON or missing fields 
-  regardless of how precise the prompt is
-- Running ML in Python and API logic in TypeScript reflects 
-  real production architecture and avoids forcing a round peg 
-  into a square hole
+# Start local PostgreSQL, Redis, and ML service
+cd server && docker compose up -d
+docker exec -i logdrain-postgres psql -U logdrain -d logdrain_db < src/db/schema.sql
 
----
+# In separate terminals
+cd server && npm ci && npm run dev
+cd server && npm run worker
+cd client && npm ci && npm run dev
+```
 
-*Built with Node.js, Python, PostgreSQL, Redis, LangChain, 
-LangGraph, LangSmith, FastAPI, and scikit-learn.*
+On PowerShell, copy the environment file with `Copy-Item server/.env.example server/.env` and apply the schema with `Get-Content src/db/schema.sql | docker exec -i logdrain-postgres psql -U logdrain -d logdrain_db`.
+
+Open `http://localhost:5173` to register, create a project, and obtain an API key.
+
+## Deploy to AWS EC2
+
+Configure a root `.env` from [`server/.env.production.example`](server/.env.production.example) with Neon, Upstash, JWT, frontend-origin, and LLM-provider values. Then run:
+
+```bash
+docker compose -f docker-compose.aws.yml --env-file .env up --build -d
+docker compose -f docker-compose.aws.yml ps
+```
+
+[`docker-compose.aws.yml`](docker-compose.aws.yml) publishes only Caddy on ports 80 and 443. Caddy serves `13-233-126-133.nip.io` over HTTPS, while the client’s Nginx proxy forwards `/api/` requests to the internal Express service.
+
+## Project structure
+
+```text
+client/                 React dashboard and Nginx configuration
+server/                 Express API, workers, retrieval, auth, and database schema
+python-ml/              FastAPI IsolationForest service
+docker-compose.aws.yml  AWS EC2 deployment stack
+Caddyfile               HTTPS reverse-proxy configuration
+```
+
+## Validation
+
+```bash
+cd server && npm test
+cd client && npm run lint && npm run build
+```
+
+Built with TypeScript, React, Node.js, Python, PostgreSQL/pgvector, Redis, LangChain, LangGraph, FastAPI, Docker Compose, and AWS EC2.
