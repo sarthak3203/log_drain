@@ -10,15 +10,25 @@ export async function processEmbeddings(): Promise<void> {
     const rawItems = await redis.lpop('embedding_queue', BATCH_SIZE);
     for (const raw of rawItems || []) {
       try {
-        const item = JSON.parse(raw) as { log_id?: number; project_id?: string; message?: string };
+        const parsed = JSON.parse(raw) as {
+          log_id?: number | string;
+          project_id?: string;
+          message?: string;
+        };
+        const logId = Number(parsed.log_id);
         if (
-          typeof item.log_id !== 'number' ||
-          typeof item.project_id !== 'string' ||
-          typeof item.message !== 'string'
+          !Number.isInteger(logId) ||
+          logId <= 0 ||
+          typeof parsed.project_id !== 'string' ||
+          typeof parsed.message !== 'string'
         ) {
-          throw new Error('Embedding queue item is missing log_id, project_id, or message');
+          throw new Error('Embedding queue item is missing or has invalid log_id, project_id, or message');
         }
-        items.push({ log_id: item.log_id, project_id: item.project_id, message: item.message });
+        items.push({
+          log_id: logId,
+          project_id: parsed.project_id,
+          message: parsed.message,
+        });
       } catch (e) {
         console.error('Skipping malformed embedding queue item:', raw);
       }
